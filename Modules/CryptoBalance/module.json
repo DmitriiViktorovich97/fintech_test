@@ -1,0 +1,11 @@
+{
+    "name": "CryptoBalance",
+    "alias": "cryptobalance",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\CryptoBalance\\Providers\\CryptoBalanceServiceProvider"
+    ],
+    "files": []
+}

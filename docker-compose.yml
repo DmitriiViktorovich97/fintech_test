@@ -1,0 +1,96 @@
+version: "3.9"
+
+services:
+  nginx:
+    container_name: ${DOCKER_PROJECT}_nginx
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "${DOCKER_NGINX_PORT}:80"
+      - "${DOCKER_NGINX_SSL_PORT}:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./:/var/www/html:cached
+      - ./certs:/etc/nginx/certs
+      - ./logs:/var/log/nginx
+    depends_on:
+      - crypto_balance_fpm
+    networks:
+      - core-netw
+
+  crypto_balance_fpm:
+    container_name: ${DOCKER_PROJECT}_crypto_balance_fpm
+    build:
+      context: ./docker/php
+      dockerfile: Dockerfile
+      args:
+        UID: ${UID}
+        GID: ${GID}
+    restart: unless-stopped
+    environment:
+      CURRENT_MODULE: CryptoBalance
+      XDEBUG_CONFIG: client_host=${XDEBUG_REMOTE_HOST}
+      PHP_IDE_CONFIG: serverName=localhost
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./:/var/www/html
+      - ./Modules/CryptoBalance:/var/www/html/Modules/CryptoBalance
+      - ./docker/php/php.ini:/usr/local/etc/php/php.ini
+      - ~/.composer:/.composer
+      - ./storage:/var/www/html/storage:cached
+      - ./logs/crypto:/var/www/html/storage/logs
+    mem_reservation: 1g
+    ports:
+      - "9010:9000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "php-fpm"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - core-netw
+    working_dir: /var/www/html
+    user: ${UID}
+
+  db:
+    container_name: ${DOCKER_PROJECT}_db
+    image: postgres:15-alpine
+    restart: unless-stopped
+    volumes:
+      - ./database/init:/docker-entrypoint-initdb.d
+      - ./data/pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_DATABASE}
+    ports:
+      - "${DOCKER_POSTGRES_EXTERNAL_PORT}:5432"
+    networks:
+      - core-netw
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  adminer:
+    container_name: ${DOCKER_PROJECT}_adminer
+    image: adminer
+    restart: unless-stopped
+    ports:
+      - 8090:8080
+    networks:
+      - core-netw
+
+networks:
+  core-netw:
+    driver: bridge
