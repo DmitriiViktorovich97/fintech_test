@@ -7,8 +7,11 @@ use Illuminate\Contracts\View\Factory;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Modules\CryptoBalance\Jobs\ProcessBalanceOperation;
 use Modules\CryptoBalance\Models\Balance;
 use Modules\CryptoBalance\Models\Cryptodictionary;
+use Modules\CryptoBalance\Models\Transaction;
 use Modules\CryptoBalance\Services\BalanceService;
 
 class CryptoBalanceController extends Controller
@@ -17,6 +20,7 @@ class CryptoBalanceController extends Controller
 
     public function index(Request $request): Factory|View
     {
+        Auth::loginUsingId(1);
         $user = $request->user();
         $balances = Balance::with('cryptodictionary')->where('user_id', $user->id)->get();
         $cryptos = Cryptodictionary::all();
@@ -30,19 +34,16 @@ class CryptoBalanceController extends Controller
             'user_id' => 'required|exists:users,id',
             'currency_code' => 'required|exists:cryptodictionaries,code',
             'amount' => 'required|numeric|min:0.00000001',
-            'txid' => 'nullable|string|unique:transactions,txid',
+            'txid' => 'nullable|string|unique:transactions,txid'
         ]);
 
         try {
-            $this->balanceService->credit(
-                $request->user_id,
-                $request->currency_code,
-                $request->amount,
-                $request->txid,
-                $request->except(['_token', 'user_id', 'currency_code', 'amount', 'txid'])
+            $transaction = $this->balanceService->createTransaction(
+                Transaction::CREDIT, $request->user_id, $request->currency_code, $request->amount, $request->txid
             );
 
-            return redirect()->back()->with('success', 'Зачисление выполнено');
+            ProcessBalanceOperation::dispatch($transaction);
+            return redirect()->back()->with('info', 'Транзакция добавлена в очередь для зачисления');
         } catch (\Throwable $e) {
             return redirect()->back()->with('error', $e->getMessage());
         }
@@ -54,18 +55,16 @@ class CryptoBalanceController extends Controller
             'user_id' => 'required|exists:users,id',
             'currency_code' => 'required|exists:cryptodictionaries,code',
             'amount' => 'required|numeric|min:0.00000001',
+            'txid' => 'nullable|string|unique:transactions,txid'
         ]);
 
         try {
-            $this->balanceService->debit(
-                $request->user_id,
-                $request->currency_code,
-                $request->amount,
-                $request->txid,
-                $request->except(['_token', 'user_id', 'currency_code', 'amount', 'txid'])
+            $transaction = $this->balanceService->createTransaction(
+                Transaction::DEBIT, $request->user_id, $request->currency_code, $request->amount, $request->txid
             );
 
-            return redirect()->back()->with('success', 'Списание выполнено');
+            ProcessBalanceOperation::dispatch($transaction);
+            return redirect()->back()->with('info', 'Транзакция добавлена в очередь для списания');
         } catch (\Throwable $e) {
             return redirect()->back()->with('error', $e->getMessage());
         }

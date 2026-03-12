@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   nginx:
     container_name: ${DOCKER_PROJECT}_nginx
@@ -49,6 +47,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "pgrep", "-f", "php-fpm"]
       interval: 10s
@@ -91,6 +91,42 @@ services:
     networks:
       - core-netw
 
+  redis:
+    container_name: ${DOCKER_PROJECT}_redis
+    image: redis:latest
+    command: [ "redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}" ]
+    restart: unless-stopped
+    volumes:
+      - redis:/data
+    networks:
+      - core-netw
+    labels:
+      - project=${DOCKER_PROJECT}
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  supervisor:
+    container_name: ${DOCKER_PROJECT}_supervisor
+    build:
+      context: ./docker/supervisor
+      dockerfile: Dockerfile
+    volumes:
+      - ./:/var/www/html
+      - ./docker/supervisor/supervisord.conf:/etc/supervisor/supervisord.conf
+    restart: unless-stopped
+    networks:
+      - core-netw
+    labels:
+      - project=${DOCKER_PROJECT}
+
 networks:
   core-netw:
     driver: bridge
+
+volumes:
+  db:
+  redis:

@@ -1,6 +1,6 @@
 <x-cryptobalance::layouts.master>
-    @if(session('success'))
-        <div style="color: green;">{{ session('success') }}</div>
+    @if(session('info'))
+        <div style="color: green;">{{ session('info') }}</div>
     @endif
     @if(session('error'))
         <div style="color: red;">{{ session('error') }}</div>

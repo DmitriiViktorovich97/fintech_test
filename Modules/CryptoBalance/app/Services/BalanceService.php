@@ -10,84 +10,86 @@ use RuntimeException;
 
 class BalanceService
 {
-    public function credit(int $userId, string $currencyCode, string $amount, ?string $txid = null, array $metadata = []): Balance
-    {
+    public function createTransaction(string $type,
+        int $userId, string $currencyCode, string $amount, ?string
+        $txid = null, array $metadata = [], $status = "pending"
+    ) {
         $crypto = Cryptodictionary::query()
             ->where('code', $currencyCode)
             ->firstOrFail();
 
         if ($txid && Transaction::query()->where('txid', $txid)->exists())
-            throw new RuntimeException('Transaction with this txid already processed');
+            throw new RuntimeException('Такая транзакция уже есть');
 
-        return DB::transaction(function () use ($userId, $crypto, $amount, $txid, $metadata)
+        $balance = Balance::query()
+            ->firstOrCreate(
+                ['user_id' => $userId, 'cryptodictionaries_id' => $crypto->id],
+                ['amount' => '0']
+            );
+
+        $balanceBefore = $balance->amount;
+        $balanceAfter = match($type) {
+            Transaction::CREDIT => bcadd($balanceBefore, $amount, 18),
+            Transaction::DEBIT => bcsub($balanceBefore, $amount, 18)
+        };
+
+        return Transaction::query()->create([
+            'user_id' => $userId,
+            'cryptodictionaries_id' => $crypto->id,
+            'type' => $type,
+            'amount' => $amount,
+            'txid' => $txid,
+            'metadata' => $metadata,
+            'status' => $status,
+            'balance_before' => $balanceBefore,
+            'balance_after' => $balanceAfter,
+        ]);
+    }
+
+    public function processCredit(Transaction $transaction): Balance
+    {
+        return DB::transaction(function () use ($transaction)
         {
             $balance = Balance::query()
                 ->lockForUpdate()
                 ->firstOrCreate(
-                    ['user_id' => $userId, 'cryptodictionaries_id' => $crypto->id],
+                    ['user_id' => $transaction->user_id, 'cryptodictionaries_id' => $transaction->cryptodictionaries_id],
                     ['amount' => '0']
                 );
 
-            $oldBalance = $balance->amount;
-            $newBalance = bcadd($oldBalance, $amount, 18);
+            $newBalance = bcadd($balance->amount, $transaction->amount, 18);
+            $balance->update(['amount' => $newBalance]);
 
-            $balance->amount = $newBalance;
-            $balance->save();
-
-            Transaction::query()->create([
-                'user_id' => $userId,
-                'cryptodictionaries_id' => $crypto->id,
-                'type' => 'credit',
-                'amount' => $amount,
-                'balance_before' => $oldBalance,
-                'balance_after' => $newBalance,
-                'txid' => $txid,
-                'metadata' => $metadata,
-                'status' => 'completed',
+            $transaction->update([
+                'status' => 'completed'
             ]);
 
             return $balance;
         });
     }
 
-    public function debit(int $userId, string $currencyCode, string $amount, ?string $txid = null, array $metadata = []): Balance
+    public function processDebit(Transaction $transaction): Balance
     {
-        $crypto = Cryptodictionary::query()
-            ->where('code', $currencyCode)
-            ->firstOrFail();
-
-        return DB::transaction(function () use ($userId, $crypto, $amount, $txid, $metadata)
+        return DB::transaction(function () use ($transaction)
         {
             $balance = Balance::query()
                 ->lockForUpdate()
-                ->where('user_id', $userId)
-                ->where('cryptodictionaries_id', $crypto->id)
+                ->where('user_id', $transaction->user_id)
+                ->where('cryptodictionaries_id', $transaction->cryptodictionaries_id)
                 ->first();
 
             if (!$balance)
                 throw new RuntimeException('Баланс не найден');
 
-            if (bccomp($balance->amount, $amount, 18) < 0)
-                throw new RuntimeException('Нехватает средств');
+            if (bccomp($balance->amount, $transaction->amount, 18) < 0)
+                throw new RuntimeException('Нехватает средств ' . $balance->amount ." " . $transaction->amount);
 
-            $oldBalance = $balance->amount;
-            $newBalance = bcsub($oldBalance, $amount, 18);
+            $newBalance = bcsub($balance->amount, $transaction->amount, 18);
+            $balance->update(['amount' => $newBalance]);
 
-            $balance->amount = $newBalance;
-            $balance->save();
-
-            Transaction::query()->create([
-                'user_id' => $userId,
-                'cryptodictionaries_id' => $crypto->id,
-                'type' => 'debit',
-                'amount' => $amount,
-                'balance_before' => $oldBalance,
-                'balance_after' => $newBalance,
-                'txid' => $txid,
-                'metadata' => $metadata,
-                'status' => 'completed',
+            $transaction->update([
+                'status' => 'completed'
             ]);
-
 
             return $balance;
         });

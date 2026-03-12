@@ -10,6 +10,9 @@ class Transaction extends Model
 {
     protected $table = 'transactions';
 
+    const CREDIT = 'credit';
+    const DEBIT = 'debit';
+
     protected $fillable = [
         'user_id',
         'cryptodictionaries_id',
